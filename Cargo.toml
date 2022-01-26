@@ -4,6 +4,10 @@ version = "0.0.0"
 authors = ["Rijk van Putten <rijk@rijkvp.nl>"]
 edition = "2021"
 description = "A flexible and customizable static site generator"
+readme = "README.md"
+homepage = "https://github.com/rijkvp/renatic"
+repository = "https://github.com/rijkvp/renatic"
+license = "GPL-3.0"
 keywords = ["static", "site", "generator", "blog"]
 categories = ["command-line-utilities", "web-programming"]
 
