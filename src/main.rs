@@ -30,7 +30,7 @@ fn main() -> Result<()> {
 
     let template_engine = TemplateEngine::load(source_dir.clone())?;
 
-    generate(&source_dir, &template_engine)?;
+    generate(&source_dir, &cli.output, &template_engine)?;
 
     Ok(())
 }

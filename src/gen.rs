@@ -11,18 +11,26 @@ use log::info;
 use pulldown_cmark::{html, Options, Parser};
 use std::{collections::HashMap, fs, path::PathBuf};
 use tera::Context as TemplateContext;
-use walkdir::{DirEntry, WalkDir};
 
-fn is_hidden(entry: &DirEntry) -> bool {
-    entry
-        .file_name()
-        .to_str()
-        .map(|s| s.starts_with("."))
-        .unwrap_or(false)
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+enum IndexType {
+    Dir,
+    File,
+    Feed,
 }
 
-pub fn generate(root_dir: &PathBuf, template_engine: &TemplateEngine) -> Result<()> {
-    let config_path = root_dir.join("renatic.yaml");
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+struct FileIndex {
+    path: PathBuf,
+    index_type: IndexType,
+}
+
+pub fn generate(
+    source_dir: &PathBuf,
+    out_dir: &PathBuf,
+    template_engine: &TemplateEngine,
+) -> Result<()> {
+    let config_path = source_dir.join("renatic.yaml");
     let config = Config::load(&config_path).with_context(|| {
         format!(
             "Failed to load configuration file from '{}'",
@@ -30,53 +38,121 @@ pub fn generate(root_dir: &PathBuf, template_engine: &TemplateEngine) -> Result<
         )
     })?;
 
-    for entry in WalkDir::new(&root_dir)
-        .into_iter()
-        .filter_entry(|e| !is_hidden(e))
-    {
-        let entry = entry?;
-        if entry.path().is_dir() {
-            let feed_path = entry.path().join("feed.yaml");
-            // Generate and copy as feed
-            if feed_path.exists() {
+    if out_dir.exists() {
+        fs::remove_dir_all(out_dir).with_context(|| "Failed to remove previous output")?;
+    }
+    fs::create_dir_all(out_dir).with_context(|| "Failed to create output directory")?;
+
+    let file_index = index_files(source_dir, 0).with_context(|| "Failed to index files")?;
+    info!("Indexed {} items (files/dirs/feeds)", file_index.len());
+
+    for index in file_index {
+        let child_path = index.path.strip_prefix(source_dir)?;
+        // Ignore hidden files starting with '.'
+        if config.ignore_hidden && child_path.starts_with(".") {
+            continue;
+        }
+        // Ignore paths according to config
+        let mut is_ignored = false;
+        for ignore_path in config.ignore_paths.iter() {
+            if child_path.starts_with(ignore_path) {
+                is_ignored = true;
+                break;
+            }
+        }
+        if is_ignored {
+            continue;
+        }
+
+        let out_path = out_dir.join(&child_path);
+        match index.index_type {
+            IndexType::Dir => {
+                fs::create_dir(out_path)?;
+            }
+            IndexType::File => {
+                fs::copy(index.path, out_path)?;
+            }
+            IndexType::Feed => {
+                let feed_path = index.path.join("feed.yaml");
                 let feed_cfg = FeedConfig::load(&feed_path).with_context(|| {
                     format!(
                         "Failed to load feed configuration from '{}'",
                         feed_path.display()
                     )
                 })?;
-                let template_dir = entry.path().strip_prefix(root_dir)?;
-                info!("Generating feed '{}'", template_dir.display());
+                info!("Generating feed '{}'", child_path.display());
                 let files = generate_feed(
-                    &entry.path().to_path_buf(),
-                    &template_dir.to_path_buf(),
+                    &index.path,
+                    &child_path.to_path_buf(),
                     &config,
                     &feed_cfg,
                     &template_engine,
                 )?;
-                println!("FILES: {:#?}", files.keys());
+                info!("Writing {} generated files", files.len());
+                fs::create_dir(&out_path)?;
+                for (feed_child_path, contents) in files {
+                    let feed_out_path = out_dir.join(feed_child_path);
+                    fs::write(feed_out_path, contents)?;
+                }
             }
         }
     }
+    info!("Generation successful");
 
     Ok(())
 }
 
+fn index_files(dir: &PathBuf, depth: u32) -> Result<Vec<FileIndex>> {
+    let mut actions = Vec::new();
+    for file in fs::read_dir(dir)? {
+        let path = file?.path();
+        // Directory
+        if path.is_dir() {
+            let feed_path = path.join("feed.yaml");
+            // Feed directory
+            if feed_path.exists() {
+                actions.push(FileIndex {
+                    path,
+                    index_type: IndexType::Feed,
+                });
+            }
+            // Normal directory
+            else {
+                actions.push(FileIndex {
+                    path: path.clone(),
+                    index_type: IndexType::Dir,
+                });
+                // Recurse
+                let mut child_actions = index_files(&path, depth + 1)?;
+                actions.append(&mut child_actions);
+            }
+        }
+        // File
+        else if path.is_file() {
+            actions.push(FileIndex {
+                path,
+                index_type: IndexType::File,
+            });
+        }
+    }
+    Ok(actions)
+}
+
 fn generate_feed(
-    dir: &PathBuf,
-    template_dir: &PathBuf,
+    parent_dir: &PathBuf,
+    child_dir: &PathBuf,
     config: &Config,
     feed_cfg: &FeedConfig,
     template_engine: &TemplateEngine,
 ) -> Result<HashMap<PathBuf, String>> {
     let mut result_files = HashMap::<PathBuf, String>::new();
 
-    let posts = load_posts(&dir, &template_dir)?;
+    let posts = load_posts(&parent_dir, &child_dir)?;
 
     // Generate content
     if let Some(templates) = &feed_cfg.templates {
         for template in templates.iter() {
-            let template_path = dir.join(template);
+            let template_path = parent_dir.join(template);
             for post in posts.iter() {
                 let out_path = post.target_path.with_extension("html");
                 let context = TemplateContext::from_serialize(post)?;
@@ -91,9 +167,9 @@ fn generate_feed(
         let feed = Feed::new(posts.clone(), &feed_cfg);
         let context = TemplateContext::from_serialize(feed)?;
         for template in index_templates.iter() {
-            let template_path = dir.join(template);
+            let template_path = parent_dir.join(template);
             let result = template_engine.render_file(&template_path, &context)?;
-            let out_path = template_dir.join(template);
+            let out_path = child_dir.join(template);
             result_files.insert(out_path, result);
         }
     }
