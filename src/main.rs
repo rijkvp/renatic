@@ -5,7 +5,6 @@ mod meta;
 mod rss;
 mod templating;
 
-use crate::templating::TemplateEngine;
 use anyhow::Result;
 use clap::Parser;
 use gen::generate;
@@ -28,9 +27,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let source_dir = cli.source.unwrap_or(Path::new(".").to_path_buf());
 
-    let template_engine = TemplateEngine::load(source_dir.clone())?;
-
-    generate(&source_dir, &cli.output, &template_engine)?;
+    generate(&source_dir, &cli.output)?;
 
     Ok(())
 }

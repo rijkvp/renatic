@@ -1,3 +1,4 @@
+use crate::config::Config;
 use anyhow::{Context, Result};
 use log::info;
 use std::path::PathBuf;
@@ -10,9 +11,11 @@ pub struct TemplateEngine {
 }
 
 impl TemplateEngine {
-    pub fn load(parent_dir: PathBuf) -> Result<Self> {
-        let dirs = format!("{}/*/**.html", parent_dir.display());
-        let tera = Tera::new(&dirs)?;
+    pub fn load(parent_dir: PathBuf, config: &Config) -> Result<Self> {
+        let dirs = format!("{}/**/*.{}", parent_dir.display(), config.template_ext);
+
+        let mut tera = Tera::new(&dirs)?;
+        tera.autoescape_on(vec![]);
 
         info!("Loaded {} template files", tera.templates.len());
 
@@ -20,13 +23,14 @@ impl TemplateEngine {
     }
 
     pub fn render_file(&self, path: &PathBuf, context: &TeraContext) -> Result<String> {
-        let rel_path = path.strip_prefix(&self.parent_dir)?;
+        let canonicalized_path = path.canonicalize()?;
+        let child_path = canonicalized_path.strip_prefix(&self.parent_dir)?;
         self.tera
-            .render(rel_path.to_str().unwrap(), context)
+            .render(child_path.to_str().unwrap(), context)
             .with_context(|| {
                 format!(
                     "Failed to render template '{}' with context '{context:?}'",
-                    path.display()
+                    child_path.display(),
                 )
             })
     }

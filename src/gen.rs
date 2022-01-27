@@ -7,29 +7,26 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveTime;
-use log::info;
+use log::{info, warn};
 use pulldown_cmark::{html, Options, Parser};
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{collections::HashMap, ffi::OsStr, fs, path::PathBuf};
 use tera::Context as TemplateContext;
 
+// Type of indexed item, order determines generation order
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 enum IndexType {
+    Feed,
     Dir,
     File,
-    Feed,
 }
 
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
-struct FileIndex {
+#[derive(Debug)]
+struct IndexItem {
     path: PathBuf,
     index_type: IndexType,
 }
 
-pub fn generate(
-    source_dir: &PathBuf,
-    out_dir: &PathBuf,
-    template_engine: &TemplateEngine,
-) -> Result<()> {
+pub fn generate(source_dir: &PathBuf, out_dir: &PathBuf) -> Result<()> {
     let config_path = source_dir.join("renatic.yaml");
     let config = Config::load(&config_path).with_context(|| {
         format!(
@@ -38,13 +35,15 @@ pub fn generate(
         )
     })?;
 
+    let template_engine = TemplateEngine::load(source_dir.clone(), &config)?;
+
     if out_dir.exists() {
         fs::remove_dir_all(out_dir).with_context(|| "Failed to remove previous output")?;
     }
     fs::create_dir_all(out_dir).with_context(|| "Failed to create output directory")?;
 
-    let file_index = index_files(source_dir, 0).with_context(|| "Failed to index files")?;
-    info!("Indexed {} items (files/dirs/feeds)", file_index.len());
+    let mut file_index = index_files(source_dir, 0).with_context(|| "Failed to index files")?;
+    file_index.sort_by(|a, b| a.index_type.cmp(&b.index_type));
 
     for index in file_index {
         let child_path = index.path.strip_prefix(source_dir)?;
@@ -65,12 +64,29 @@ pub fn generate(
         }
 
         let out_path = out_dir.join(&child_path);
+        if out_path.exists() {
+            warn!(
+                "The file '{}' is skipped because it was already generated in an earlier stage! \
+                Make sure you don't have dupplicate files or configure to ignore them",
+                child_path.display()
+            );
+            continue;
+        }
+
         match index.index_type {
             IndexType::Dir => {
                 fs::create_dir(out_path)?;
             }
             IndexType::File => {
-                fs::copy(index.path, out_path)?;
+                if index.path.extension() == Some(OsStr::new(&config.template_ext)) {
+                    info!("Render '{}'", &child_path.display());
+                    let contents =
+                        template_engine.render_file(&index.path, &TemplateContext::default())?;
+                    fs::write(out_path, contents)?;
+                } else {
+                    info!("Copy '{}'", &child_path.display());
+                    fs::copy(index.path, out_path)?;
+                }
             }
             IndexType::Feed => {
                 let feed_path = index.path.join("feed.yaml");
@@ -102,7 +118,7 @@ pub fn generate(
     Ok(())
 }
 
-fn index_files(dir: &PathBuf, depth: u32) -> Result<Vec<FileIndex>> {
+fn index_files(dir: &PathBuf, depth: u32) -> Result<Vec<IndexItem>> {
     let mut actions = Vec::new();
     for file in fs::read_dir(dir)? {
         let path = file?.path();
@@ -111,14 +127,14 @@ fn index_files(dir: &PathBuf, depth: u32) -> Result<Vec<FileIndex>> {
             let feed_path = path.join("feed.yaml");
             // Feed directory
             if feed_path.exists() {
-                actions.push(FileIndex {
+                actions.push(IndexItem {
                     path,
                     index_type: IndexType::Feed,
                 });
             }
             // Normal directory
             else {
-                actions.push(FileIndex {
+                actions.push(IndexItem {
                     path: path.clone(),
                     index_type: IndexType::Dir,
                 });
@@ -129,7 +145,7 @@ fn index_files(dir: &PathBuf, depth: u32) -> Result<Vec<FileIndex>> {
         }
         // File
         else if path.is_file() {
-            actions.push(FileIndex {
+            actions.push(IndexItem {
                 path,
                 index_type: IndexType::File,
             });
@@ -154,7 +170,7 @@ fn generate_feed(
         for template in templates.iter() {
             let template_path = parent_dir.join(template);
             for post in posts.iter() {
-                let out_path = post.target_path.with_extension("html");
+                let out_path = post.target_path.with_extension(&config.template_ext);
                 let context = TemplateContext::from_serialize(post)?;
                 let result = template_engine.render_file(&template_path, &context)?;
                 result_files.insert(out_path, result);

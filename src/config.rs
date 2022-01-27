@@ -8,6 +8,7 @@ pub struct Config {
     pub ignore_paths: Vec<PathBuf>,
     pub ignore_hidden: bool,
     pub base_url: String,
+    pub template_ext: String,
 }
 
 impl Config {
