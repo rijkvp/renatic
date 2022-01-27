@@ -7,7 +7,7 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveTime;
-use log::{info, warn};
+use log::{info, trace, warn};
 use pulldown_cmark::{html, Options, Parser};
 use std::{collections::HashMap, ffi::OsStr, fs, path::PathBuf};
 use tera::Context as TemplateContext;
@@ -44,6 +44,7 @@ pub fn generate(source_dir: &PathBuf, out_dir: &PathBuf) -> Result<()> {
 
     let mut file_index = index_files(source_dir, 0).with_context(|| "Failed to index files")?;
     file_index.sort_by(|a, b| a.index_type.cmp(&b.index_type));
+    info!("Indexed {} items (files/dirs/feeds)", file_index.len());
 
     for index in file_index {
         let child_path = index.path.strip_prefix(source_dir)?;
@@ -75,16 +76,17 @@ pub fn generate(source_dir: &PathBuf, out_dir: &PathBuf) -> Result<()> {
 
         match index.index_type {
             IndexType::Dir => {
+                trace!("Create dir '{}'", &out_dir.display());
                 fs::create_dir(out_path)?;
             }
             IndexType::File => {
                 if index.path.extension() == Some(OsStr::new(&config.template_ext)) {
-                    info!("Render '{}'", &child_path.display());
+                    trace!("Render '{}'", &child_path.display());
                     let contents =
                         template_engine.render_file(&index.path, &TemplateContext::default())?;
                     fs::write(out_path, contents)?;
                 } else {
-                    info!("Copy '{}'", &child_path.display());
+                    trace!("Copy '{}'", &child_path.display());
                     fs::copy(index.path, out_path)?;
                 }
             }
@@ -104,7 +106,7 @@ pub fn generate(source_dir: &PathBuf, out_dir: &PathBuf) -> Result<()> {
                     &feed_cfg,
                     &template_engine,
                 )?;
-                info!("Writing {} generated files", files.len());
+                trace!("Writing {} generated files", files.len());
                 fs::create_dir(&out_path)?;
                 for (feed_child_path, contents) in files {
                     let feed_out_path = out_dir.join(feed_child_path);
@@ -113,7 +115,7 @@ pub fn generate(source_dir: &PathBuf, out_dir: &PathBuf) -> Result<()> {
             }
         }
     }
-    info!("Generation successful");
+    info!("Generation successfully completed!");
 
     Ok(())
 }
@@ -165,13 +167,14 @@ fn generate_feed(
 
     let posts = load_posts(&parent_dir, &child_dir)?;
 
-    // Generate content
+    // Generate posts
     if let Some(templates) = &feed_cfg.templates {
         for template in templates.iter() {
             let template_path = parent_dir.join(template);
             for post in posts.iter() {
                 let out_path = post.target_path.with_extension(&config.template_ext);
                 let context = TemplateContext::from_serialize(post)?;
+                trace!("Render post template '{}'", out_path.display());
                 let result = template_engine.render_file(&template_path, &context)?;
                 result_files.insert(out_path, result);
             }
@@ -184,6 +187,7 @@ fn generate_feed(
         let context = TemplateContext::from_serialize(feed)?;
         for template in index_templates.iter() {
             let template_path = parent_dir.join(template);
+            trace!("Render index template '{}'", template_path.display());
             let result = template_engine.render_file(&template_path, &context)?;
             let out_path = child_dir.join(template);
             result_files.insert(out_path, result);
@@ -193,6 +197,7 @@ fn generate_feed(
     // Generate RSS
     if let Some(rss_path) = &feed_cfg.rss_path {
         let rss = generate_rss(&posts, rss_path, &config, &feed_cfg)?;
+        trace!("Render RSS feed '{}'", rss_path.display());
         result_files.insert(rss_path.to_path_buf(), rss);
     }
 
@@ -211,10 +216,14 @@ fn load_posts(dir: &PathBuf, template_dir: &PathBuf) -> Result<Vec<Post>> {
                 let (meta, content) = split_md_meta(&file_str)
                     .with_context(|| format!("Failed to read file '{}'", path.display()))?;
                 let file_name = path.file_name().unwrap();
+                let target_path = template_dir.join(path.strip_prefix(dir)?.to_path_buf());
+
+                trace!("Loaded post '{}'", &target_path.display());
+
                 posts.push(Post {
                     source_path: path.clone(),
                     file_name: file_name.to_str().unwrap().to_string(),
-                    target_path: template_dir.join(path.strip_prefix(dir)?.to_path_buf()),
+                    target_path,
                     meta,
                     content,
                 });
