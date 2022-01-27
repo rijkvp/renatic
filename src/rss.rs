@@ -25,7 +25,7 @@ pub struct RssChannel {
     pub title: String,
     #[serde(rename = "$unflatten=link")]
     pub link: String,
-    #[serde(rename = "$unflatten=atom:link")]
+    #[serde(rename = "atom:link")]
     pub atom_link: RssLink,
     #[serde(rename = "$unflatten=description")]
     pub description: String,
@@ -40,7 +40,7 @@ impl RssChannel {
             link: link.clone(),
             atom_link: RssLink::from_link(link.clone()),
             description,
-            items
+            items,
         }
     }
 }
@@ -106,7 +106,7 @@ mod rss_date_format {
 pub fn to_str(feed: RssFeed) -> Result<String> {
     let mut buffer = Vec::new();
     let writer = Writer::new_with_indent(&mut buffer, b' ', 2);
-    let mut ser = Serializer::with_root(writer, None);
+    let mut ser = Serializer::with_root(writer, Some("rss"));
 
     feed.serialize(&mut ser)?;
     let string = String::from_utf8(buffer)?;

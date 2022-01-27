@@ -165,14 +165,14 @@ fn generate_feed(
 ) -> Result<HashMap<PathBuf, String>> {
     let mut result_files = HashMap::<PathBuf, String>::new();
 
-    let posts = load_posts(&parent_dir, &child_dir)?;
+    let posts = load_posts(&parent_dir, &child_dir, &config)?;
 
     // Generate posts
     if let Some(templates) = &feed_cfg.templates {
         for template in templates.iter() {
             let template_path = parent_dir.join(template);
             for post in posts.iter() {
-                let out_path = post.target_path.with_extension(&config.template_ext);
+                let out_path = post.child_path.with_extension(&config.template_ext);
                 let context = TemplateContext::from_serialize(post)?;
                 trace!("Render post template '{}'", out_path.display());
                 let result = template_engine.render_file(&template_path, &context)?;
@@ -204,7 +204,7 @@ fn generate_feed(
     Ok(result_files)
 }
 
-fn load_posts(dir: &PathBuf, template_dir: &PathBuf) -> Result<Vec<Post>> {
+fn load_posts(dir: &PathBuf, template_dir: &PathBuf, config: &Config) -> Result<Vec<Post>> {
     let mut posts = Vec::<Post>::new();
 
     // Iterate all markdown files
@@ -216,14 +216,18 @@ fn load_posts(dir: &PathBuf, template_dir: &PathBuf) -> Result<Vec<Post>> {
                 let (meta, content) = split_md_meta(&file_str)
                     .with_context(|| format!("Failed to read file '{}'", path.display()))?;
                 let file_name = path.file_name().unwrap();
-                let target_path = template_dir.join(path.strip_prefix(dir)?.to_path_buf());
+                let child_path = template_dir.join(path.strip_prefix(dir)?.to_path_buf());
+                let target_path = child_path.with_extension(&config.template_ext);
+                let route = target_path.with_extension("");
 
-                trace!("Loaded post '{}'", &target_path.display());
+                trace!("Loaded post '{}'", &child_path.display());
 
                 posts.push(Post {
                     source_path: path.clone(),
                     file_name: file_name.to_str().unwrap().to_string(),
+                    child_path,
                     target_path,
+                    route,
                     meta,
                     content,
                 });
@@ -272,9 +276,9 @@ fn generate_rss(
     for post in posts {
         rss_items.push(RssItem {
             title: post.meta.title.clone(),
-            link: post.target_path.to_str().unwrap().to_string(),
+            link: post.child_path.to_str().unwrap().to_string(),
             description: post.content.to_string(),
-            guid: post.target_path.to_str().unwrap().to_string(),
+            guid: post.child_path.to_str().unwrap().to_string(),
             pub_date: post.meta.date.and_time(NaiveTime::from_hms(12, 0, 0)),
         })
     }

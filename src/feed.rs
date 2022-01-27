@@ -4,14 +4,21 @@ use std::path::PathBuf;
 
 #[derive(Clone, Serialize)]
 pub struct Post {
-    /// The path of the original file
+    /// Original source path
     #[serde(skip)]
     pub source_path: PathBuf,
-    /// The file name of the original file
+    /// Original child path
+    pub child_path: PathBuf,
+    /// Original file name
     pub file_name: String,
-    /// The relative destination path
-    #[serde(rename = "path")]
+
+    /// Path of destination file
+    #[serde(rename="path")]
     pub target_path: PathBuf,
+    /// Destination path without extension
+    pub route: PathBuf,
+
+
     pub meta: Meta,
     pub content: String,
 }
