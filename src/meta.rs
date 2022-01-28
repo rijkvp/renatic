@@ -2,19 +2,19 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct MetaLink {
     content: String,
     url: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct MetaImage {
     alt: String,
     file_name: PathBuf,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Meta {
     pub title: String,
     subtitle: Option<String>,

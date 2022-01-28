@@ -1,9 +1,9 @@
 use crate::{
     config::{Config, FeedConfig},
-    feed::{Feed, Post},
+    feed::{Feed},
     meta::Meta,
     rss::{self, RssChannel, RssFeed, RssItem},
-    templating::TemplateEngine,
+    templating::TemplateEngine, post::{Post, PostLocation},
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveTime;
@@ -172,7 +172,7 @@ fn generate_feed(
         for template in templates.iter() {
             let template_path = parent_dir.join(template);
             for post in posts.iter() {
-                let out_path = post.child_path.with_extension(&config.template_ext);
+                let out_path = post.location.child_path.with_extension(&config.template_ext);
                 let context = TemplateContext::from_serialize(post)?;
                 trace!("Render post template '{}'", out_path.display());
                 let result = template_engine.render_file(&template_path, &context)?;
@@ -215,19 +215,13 @@ fn load_posts(dir: &PathBuf, template_dir: &PathBuf, config: &Config) -> Result<
                 let file_str = fs::read_to_string(&path)?;
                 let (meta, content) = split_md_meta(&file_str)
                     .with_context(|| format!("Failed to read file '{}'", path.display()))?;
-                let file_name = path.file_name().unwrap();
-                let child_path = template_dir.join(path.strip_prefix(dir)?.to_path_buf());
-                let target_path = child_path.with_extension(&config.template_ext);
-                let route = target_path.with_extension("");
 
-                trace!("Loaded post '{}'", &child_path.display());
+                let location = PostLocation::from_paths(template_dir, dir, &path, &config.template_ext)
+                    .with_context(|| "Failed to get post location")?;
+                trace!("Loaded post '{}'", &location.child_path.display());
 
                 posts.push(Post {
-                    source_path: path.clone(),
-                    file_name: file_name.to_str().unwrap().to_string(),
-                    child_path,
-                    target_path,
-                    route,
+                    location,
                     meta,
                     content,
                 });
@@ -276,9 +270,9 @@ fn generate_rss(
     for post in posts {
         rss_items.push(RssItem {
             title: post.meta.title.clone(),
-            link: post.child_path.to_str().unwrap().to_string(),
+            link: post.location.child_path.to_str().unwrap().to_string(),
             description: post.content.to_string(),
-            guid: post.child_path.to_str().unwrap().to_string(),
+            guid: post.location.child_path.to_str().unwrap().to_string(),
             pub_date: post.meta.date.and_time(NaiveTime::from_hms(12, 0, 0)),
         })
     }

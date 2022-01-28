@@ -2,6 +2,7 @@ mod config;
 mod feed;
 mod gen;
 mod meta;
+mod post;
 mod rss;
 mod templating;
 
