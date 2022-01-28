@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct RssFeed {
-    pub version: f32,
+    pub version: String,
     #[serde(rename = "channel")]
     pub channels: Vec<RssChannel>,
 }
@@ -13,20 +13,17 @@ pub struct RssFeed {
 impl RssFeed {
     pub fn from_channel(channel: RssChannel) -> Self {
         Self {
-            version: 2.0,
+            version: "2.0".to_string(),
             channels: vec![channel],
         }
     }
 }
-
 #[derive(Clone, Deserialize, Serialize)]
 pub struct RssChannel {
     #[serde(rename = "$unflatten=title")]
     pub title: String,
     #[serde(rename = "$unflatten=link")]
     pub link: String,
-    #[serde(rename = "atom:link")]
-    pub atom_link: RssLink,
     #[serde(rename = "$unflatten=description")]
     pub description: String,
     #[serde(rename = "item")]
@@ -38,27 +35,8 @@ impl RssChannel {
         Self {
             title,
             link: link.clone(),
-            atom_link: RssLink::from_link(link.clone()),
             description,
             items,
-        }
-    }
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-pub struct RssLink {
-    pub href: String,
-    pub rel: String,
-    #[serde(rename = "type")]
-    pub mime_type: String,
-}
-
-impl RssLink {
-    pub fn from_link(link: String) -> Self {
-        Self {
-            href: link,
-            rel: "self".to_string(),
-            mime_type: "application/rss+xml".to_string(),
         }
     }
 }

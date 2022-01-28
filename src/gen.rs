@@ -1,9 +1,10 @@
 use crate::{
     config::{Config, FeedConfig},
-    feed::{Feed},
+    feed::Feed,
     meta::Meta,
+    post::{Post, PostLocation},
     rss::{self, RssChannel, RssFeed, RssItem},
-    templating::TemplateEngine, post::{Post, PostLocation},
+    templating::TemplateEngine,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveTime;
@@ -172,7 +173,10 @@ fn generate_feed(
         for template in templates.iter() {
             let template_path = parent_dir.join(template);
             for post in posts.iter() {
-                let out_path = post.location.child_path.with_extension(&config.template_ext);
+                let out_path = post
+                    .location
+                    .child_path
+                    .with_extension(&config.template_ext);
                 let context = TemplateContext::from_serialize(post)?;
                 trace!("Render post template '{}'", out_path.display());
                 let result = template_engine.render_file(&template_path, &context)?;
@@ -216,8 +220,9 @@ fn load_posts(dir: &PathBuf, template_dir: &PathBuf, config: &Config) -> Result<
                 let (meta, content) = split_md_meta(&file_str)
                     .with_context(|| format!("Failed to read file '{}'", path.display()))?;
 
-                let location = PostLocation::from_paths(template_dir, dir, &path, &config.template_ext)
-                    .with_context(|| "Failed to get post location")?;
+                let location =
+                    PostLocation::from_paths(template_dir, dir, &path, &config.template_ext)
+                        .with_context(|| "Failed to get post location")?;
                 trace!("Loaded post '{}'", &location.child_path.display());
 
                 posts.push(Post {
@@ -240,7 +245,7 @@ fn split_md_meta(input: &str) -> Result<(Meta, String)> {
     if splits.len() != 3 {
         return Err(anyhow!("Invalid meta section!"));
     }
-    let meta = serde_yaml::from_str::<Meta>(&splits[1])?;
+    let meta = Meta::from_str(&splits[1]).with_context(|| "Failed to read meta information")?;
     let contents = md_to_html(&splits[2]);
     Ok((meta, contents))
 }

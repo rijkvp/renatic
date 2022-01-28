@@ -29,7 +29,7 @@ impl TemplateEngine {
             .render(child_path.to_str().unwrap(), context)
             .with_context(|| {
                 format!(
-                    "Failed to render template '{}' with context '{context:?}'",
+                    "Failed to render template '{}' with context '{context:#?}'",
                     child_path.display(),
                 )
             })
