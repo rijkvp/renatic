@@ -5,10 +5,12 @@ use crate::{
     post::{Post, PostLocation},
     rss::{self, RssChannel, RssFeed, RssGuid, RssItem},
     templating::TemplateEngine,
+    MinificationLevel,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveTime;
 use log::{info, trace, warn};
+use minify_html::{minify, Cfg};
 use pulldown_cmark::{html, Options, Parser};
 use std::{collections::HashMap, ffi::OsStr, fs, path::PathBuf};
 use tera::Context as TemplateContext;
@@ -27,7 +29,11 @@ struct IndexItem {
     index_type: IndexType,
 }
 
-pub fn generate(source_dir: &PathBuf, out_dir: &PathBuf) -> Result<()> {
+pub fn generate(
+    source_dir: &PathBuf,
+    out_dir: &PathBuf,
+    minification: &MinificationLevel,
+) -> Result<()> {
     let config_path = source_dir.join("renatic.yaml");
     let config = Config::load(&config_path).with_context(|| {
         format!(
@@ -47,8 +53,8 @@ pub fn generate(source_dir: &PathBuf, out_dir: &PathBuf) -> Result<()> {
     file_index.sort_by(|a, b| a.index_type.cmp(&b.index_type));
     info!("Indexed {} items (files/dirs/feeds)", file_index.len());
 
-    for index in file_index {
-        let child_path = index.path.strip_prefix(source_dir)?;
+    for file in file_index {
+        let child_path = file.path.strip_prefix(source_dir)?;
         // Ignore hidden files starting with '.'
         if config.ignore_hidden && child_path.starts_with(".") {
             continue;
@@ -75,24 +81,34 @@ pub fn generate(source_dir: &PathBuf, out_dir: &PathBuf) -> Result<()> {
             continue;
         }
 
-        match index.index_type {
+        match file.index_type {
             IndexType::Dir => {
                 trace!("Create dir '{}'", &out_dir.display());
                 fs::create_dir(out_path)?;
             }
             IndexType::File => {
-                if index.path.extension() == Some(OsStr::new(&config.template_ext)) {
+                let ext = file
+                    .path
+                    .extension()
+                    .unwrap_or(OsStr::new(""))
+                    .to_str()
+                    .unwrap();
+                if ext == &config.template_ext {
                     trace!("Render '{}'", &child_path.display());
-                    let contents =
-                        template_engine.render_file(&index.path, &TemplateContext::default())?;
-                    fs::write(out_path, contents)?;
+                    let html =
+                        template_engine.render_file(&file.path, &TemplateContext::default())?;
+                    fs::write(out_path, minify_string(&html, minification))?;
+                } else if vec!["html", "htm", "css"].contains(&ext) {
+                    trace!("Minify & copy non-template file '{}'", file.path.display());
+                    let contents = fs::read_to_string(file.path)?;
+                    fs::write(out_path, minify_string(&contents, minification))?;
                 } else {
                     trace!("Copy '{}'", &child_path.display());
-                    fs::copy(index.path, out_path)?;
+                    fs::copy(file.path, out_path)?;
                 }
             }
             IndexType::Feed => {
-                let feed_path = index.path.join("feed.yaml");
+                let feed_path = file.path.join("feed.yaml");
                 let feed_cfg = FeedConfig::load(&feed_path).with_context(|| {
                     format!(
                         "Failed to load feed configuration from '{}'",
@@ -101,7 +117,7 @@ pub fn generate(source_dir: &PathBuf, out_dir: &PathBuf) -> Result<()> {
                 })?;
                 info!("Generating feed '{}'", child_path.display());
                 let files = generate_feed(
-                    &index.path,
+                    &file.path,
                     &child_path.to_path_buf(),
                     &config,
                     &feed_cfg,
@@ -109,9 +125,9 @@ pub fn generate(source_dir: &PathBuf, out_dir: &PathBuf) -> Result<()> {
                 )?;
                 trace!("Writing {} generated files", files.len());
                 fs::create_dir(&out_path)?;
-                for (feed_child_path, contents) in files {
+                for (feed_child_path, html) in files {
                     let feed_out_path = out_dir.join(feed_child_path);
-                    fs::write(feed_out_path, contents)?;
+                    fs::write(feed_out_path, minify_string(&html, &minification))?;
                 }
             }
         }
@@ -303,4 +319,16 @@ fn generate_rss(
     let feed = RssFeed::from_channel(channel);
     let rss_str = rss::to_str(feed)?;
     Ok(rss_str)
+}
+
+fn minify_string(input: &str, minification: &MinificationLevel) -> String {
+    match minification {
+        MinificationLevel::Disabled => input.to_string(),
+        MinificationLevel::SpecCompliant => {
+            String::from_utf8(minify(input.as_bytes(), &Cfg::spec_compliant())).unwrap()
+        }
+        MinificationLevel::Maximal => {
+            String::from_utf8(minify(input.as_bytes(), &Cfg::new())).unwrap()
+        }
+    }
 }
