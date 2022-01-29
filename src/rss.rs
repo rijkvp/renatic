@@ -21,6 +21,7 @@ impl RssFeed {
         }
     }
 }
+
 #[derive(Clone, Deserialize, Serialize)]
 pub struct RssChannel {
     #[serde(rename = "$unflatten=title")]

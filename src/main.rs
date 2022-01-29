@@ -42,11 +42,12 @@ fn main() -> Result<()> {
         .filter_level(level)
         .init();
 
-    let source_dir = cli.source.unwrap_or(Path::new(".").to_path_buf());
-    if source_dir == cli.output {
+    let source_dir = cli.source.unwrap_or(Path::new(".").to_path_buf()).canonicalize()?;
+    let out_dir = cli.output.canonicalize()?;
+    if source_dir == out_dir {
         error!("The source directory can't be the destination directory!");
     } else {
-        generate(&source_dir, &cli.output)?;
+        generate(&source_dir, &out_dir)?;
     }
 
     Ok(())
