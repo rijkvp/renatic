@@ -40,7 +40,7 @@ impl PostLocation {
         let child_path = parent_dir.join(source_path.strip_prefix(source_dir)?.to_path_buf());
 
         let file_name = child_path.file_name().context("Invalid file name")?;
-        let file_stem = child_path.file_name().context("Invalid file name")?;
+        let file_stem = child_path.file_stem().context("Invalid file name")?;
         let target_path = child_path.with_extension(target_ext);
         // Route with root /
         let route = PathBuf::from("/").join(&target_path);

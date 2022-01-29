@@ -3,7 +3,7 @@ use crate::{
     feed::Feed,
     meta::Meta,
     post::{Post, PostLocation},
-    rss::{self, RssChannel, RssFeed, RssItem},
+    rss::{self, RssChannel, RssFeed, RssGuid, RssItem},
     templating::TemplateEngine,
 };
 use anyhow::{anyhow, Context, Result};
@@ -271,14 +271,26 @@ fn generate_rss(
     config: &Config,
     feed_cfg: &FeedConfig,
 ) -> Result<String> {
+    let has_content = feed_cfg.templates.as_ref().unwrap_or(&vec![]).len() > 0;
     let mut rss_items = Vec::new();
     for post in posts {
+        let link = {
+            if has_content {
+                config.base_url.clone() + post.location.short_route.to_str().unwrap()
+            } else {
+                config.base_url.clone() + "#" + &post.location.file_stem
+            }
+        };
         rss_items.push(RssItem {
             title: post.meta.title.clone(),
-            link: post.location.child_path.to_str().unwrap().to_string(),
+            link: link.clone(),
             description: post.content.to_string(),
-            guid: post.location.child_path.to_str().unwrap().to_string(),
-            pub_date: post.meta.date.and_time(NaiveTime::from_hms(12, 0, 0)),
+            guid: RssGuid {
+                value: link,
+                is_permalink: has_content,
+            },
+            // Only date (no time) is specified for now
+            pub_date: post.meta.date.and_time(NaiveTime::from_hms(0, 0, 0)),
         })
     }
     let link = format!("{}/{}", config.base_url, rss_path.display());

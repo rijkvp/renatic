@@ -1,11 +1,13 @@
 use anyhow::Result;
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use quick_xml::{de, se::Serializer, DeError, Writer};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct RssFeed {
     pub version: String,
+    #[serde(rename = "xmlns:atom")]
+    pub atom_namespace: String,
     #[serde(rename = "channel")]
     pub channels: Vec<RssChannel>,
 }
@@ -14,6 +16,7 @@ impl RssFeed {
     pub fn from_channel(channel: RssChannel) -> Self {
         Self {
             version: "2.0".to_string(),
+            atom_namespace: "http://www.w3.org/2005/Atom".to_string(),
             channels: vec![channel],
         }
     }
@@ -24,8 +27,15 @@ pub struct RssChannel {
     pub title: String,
     #[serde(rename = "$unflatten=link")]
     pub link: String,
+    #[serde(rename = "atom:link")]
+    pub atom_link: RssAtomLink,
     #[serde(rename = "$unflatten=description")]
     pub description: String,
+    #[serde(rename = "$unflatten=lastBuildDate")]
+    #[serde(with = "rfc_2822_date")]
+    pub last_build_date: NaiveDateTime,
+    #[serde(rename = "$unflatten=generator")]
+    pub generator: String,
     #[serde(rename = "item")]
     pub items: Vec<RssItem>,
 }
@@ -35,7 +45,10 @@ impl RssChannel {
         Self {
             title,
             link: link.clone(),
+            atom_link: RssAtomLink::from_link(link),
             description,
+            last_build_date: Utc::now().naive_utc(),
+            generator: "renatic".to_string(),
             items,
         }
     }
@@ -49,26 +62,47 @@ pub struct RssItem {
     pub link: String,
     #[serde(rename = "$unflatten=description")]
     pub description: String,
-
-    #[serde(rename = "$unflatten=guid")]
-    pub guid: String,
+    pub guid: RssGuid,
     #[serde(rename = "$unflatten=pubDate")]
-    #[serde(with = "rss_date_format")]
+    #[serde(with = "rfc_2822_date")]
     pub pub_date: NaiveDateTime,
 }
 
-mod rss_date_format {
-    use chrono::{DateTime, NaiveDateTime};
-    use serde::{self, Deserialize, Deserializer, Serializer};
+#[derive(Clone, Deserialize, Serialize)]
+pub struct RssGuid {
+    #[serde(rename = "$value")]
+    pub value: String,
+    #[serde(rename = "isPermaLink")]
+    pub is_permalink: bool,
+}
+#[derive(Clone, Deserialize, Serialize)]
+pub struct RssAtomLink {
+    pub href: String,
+    pub rel: String,
+    #[serde(rename = "type")]
+    pub mime_type: String,
+}
 
-    const FORMAT: &'static str = "%a, %d %b %Y %H:%M:%s +%T";
+impl RssAtomLink {
+    pub fn from_link(link: String) -> Self {
+        Self {
+            href: link,
+            rel: "self".to_string(),
+            mime_type: "application/rss+xml".to_string(),
+        }
+    }
+}
+
+mod rfc_2822_date {
+    use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+    use serde::{self, Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(date: &NaiveDateTime, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let s = format!("{}", date.format(FORMAT));
-        serializer.serialize_str(&s)
+        let date_time: DateTime<Utc> = Utc.from_local_datetime(&date).unwrap();
+        serializer.serialize_str(&date_time.to_rfc2822())
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveDateTime, D::Error>
