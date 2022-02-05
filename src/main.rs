@@ -1,8 +1,8 @@
 mod config;
+mod content;
 mod feed;
 mod gen;
 mod meta;
-mod post;
 mod rss;
 mod templating;
 

@@ -1,10 +1,10 @@
-use crate::{config::FeedConfig, post::Post};
+use crate::{config::FeedConfig, content::Content};
 use serde::Serialize;
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize)]
 pub struct Feed {
-    pub posts: Vec<Post>,
+    pub posts: Vec<Content>,
     pub rss: Option<RssInfo>,
 }
 
@@ -15,7 +15,7 @@ pub struct RssInfo {
 }
 
 impl Feed {
-    pub fn new(posts: Vec<Post>, config: &FeedConfig) -> Self {
+    pub fn new(posts: Vec<Content>, config: &FeedConfig) -> Self {
         let rss = {
             if let Some(rss_path) = &config.rss_path {
                 Some(RssInfo {

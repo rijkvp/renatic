@@ -1,17 +1,16 @@
 use crate::{
     config::{Config, FeedConfig},
+    content::Content,
     feed::Feed,
-    meta::Meta,
-    post::{Post, PostLocation},
     rss::{self, RssChannel, RssFeed, RssGuid, RssItem},
     templating::TemplateEngine,
     MinificationLevel,
 };
-use anyhow::{anyhow, Context, Result};
-use chrono::NaiveTime;
-use log::{info, trace, warn};
+use anyhow::{Context, Result};
+use chrono::{NaiveTime, NaiveDateTime};
+use log::{error, info, trace, warn};
 use minify_html::{minify, Cfg};
-use pulldown_cmark::{html, Options, Parser};
+
 use std::{collections::HashMap, ffi::OsStr, fs, path::PathBuf};
 use tera::Context as TemplateContext;
 
@@ -93,8 +92,25 @@ pub fn generate(
                     .unwrap_or(OsStr::new(""))
                     .to_str()
                     .unwrap();
-                if ext == &config.template_ext {
-                    trace!("Render '{}'", &child_path.display());
+                if ext == "md" {
+                    trace!("Render content of '{}'", &child_path.display());
+                    let content =
+                        Content::load(source_dir, source_dir, &file.path, &config.template_ext)?;
+                    if let Some(template) = content.meta.template.clone() {
+                        let context = TemplateContext::from_serialize(content)?;
+                        let template_path = source_dir.join(template);
+                        trace!("Out path is {}", out_path.display());
+                        trace!("Temp path is {}", template_path.display());
+                        let html = template_engine.render_file(&template_path, &context)?;
+                        fs::write(out_path, minify_string(&html, minification))?;
+                    } else {
+                        error!(
+                            "Unkown template file for '{}'. Please specify a template.",
+                            child_path.display()
+                        );
+                    }
+                } else if ext == &config.template_ext {
+                    trace!("Render HTML '{}'", &child_path.display());
                     let html =
                         template_engine.render_file(&file.path, &TemplateContext::default())?;
                     fs::write(out_path, minify_string(&html, minification))?;
@@ -224,28 +240,17 @@ fn generate_feed(
     Ok(result_files)
 }
 
-fn load_posts(dir: &PathBuf, template_dir: &PathBuf, config: &Config) -> Result<Vec<Post>> {
-    let mut posts = Vec::<Post>::new();
+fn load_posts(dir: &PathBuf, template_dir: &PathBuf, config: &Config) -> Result<Vec<Content>> {
+    let mut posts = Vec::<Content>::new();
 
     // Iterate all markdown files
     for entry in fs::read_dir(&dir)? {
         let path = entry?.path().to_owned();
         if let Some(ext) = path.extension() {
             if path.is_file() && ext.eq_ignore_ascii_case("md") {
-                let file_str = fs::read_to_string(&path)?;
-                let (meta, content) = split_md_meta(&file_str)
-                    .with_context(|| format!("Failed to read file '{}'", path.display()))?;
-
-                let location =
-                    PostLocation::from_paths(template_dir, dir, &path, &config.template_ext)
-                        .with_context(|| "Failed to get post location")?;
-                trace!("Loaded post '{}'", &location.child_path.display());
-
-                posts.push(Post {
-                    location,
-                    meta,
-                    content,
-                });
+                let content = Content::load(template_dir, dir, &path, &config.template_ext)
+                    .with_context(|| format!("Failed to load content item '{}'", path.display()))?;
+                posts.push(content);
             }
         }
     }
@@ -256,33 +261,8 @@ fn load_posts(dir: &PathBuf, template_dir: &PathBuf, config: &Config) -> Result<
     Ok(posts)
 }
 
-fn split_md_meta(input: &str) -> Result<(Meta, String)> {
-    let splits: Vec<&str> = input.split("---").collect();
-    if splits.len() != 3 {
-        return Err(anyhow!("Invalid meta section!"));
-    }
-    let meta = Meta::from_str(&splits[1]).with_context(|| "Failed to read meta information")?;
-    let contents = md_to_html(&splits[2]);
-    Ok((meta, contents))
-}
-
-fn md_to_html(input: &str) -> String {
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_STRIKETHROUGH);
-    options.insert(Options::ENABLE_FOOTNOTES);
-    options.insert(Options::ENABLE_TABLES);
-    options.insert(Options::ENABLE_TASKLISTS);
-    let parser = Parser::new_ext(input, options);
-
-    // Write to String buffer.
-    let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
-
-    html_output
-}
-
 fn generate_rss(
-    posts: &[Post],
+    posts: &[Content],
     rss_path: &PathBuf,
     config: &Config,
     feed_cfg: &FeedConfig,
@@ -297,6 +277,15 @@ fn generate_rss(
                 config.base_url.clone() + "#" + &post.location.file_stem
             }
         };
+        let pub_date = {
+            if let Some(date) = post.meta.date {
+                date.and_time(NaiveTime::from_hms(12, 0, 0))
+            } else {
+                warn!("The post {} item has no date! This can cause issues with templates and RSS feed generation.", post.meta.title);
+                NaiveDateTime::from_timestamp(0, 0)
+            }
+
+        };
         rss_items.push(RssItem {
             title: post.meta.title.clone(),
             link: link.clone(),
@@ -305,8 +294,7 @@ fn generate_rss(
                 value: link,
                 is_permalink: has_content,
             },
-            // Only date (no time) is specified for now
-            pub_date: post.meta.date.and_time(NaiveTime::from_hms(0, 0, 0)),
+            pub_date
         })
     }
     let link = format!("{}/{}", config.base_url, rss_path.display());

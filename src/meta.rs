@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use serde::{Serialize, Serializer};
@@ -8,9 +10,10 @@ const DATE_FORMAT: &'static str = "%Y-%m-%d";
 #[derive(Debug, Clone)]
 pub struct Meta {
     pub title: String,
-    pub date: NaiveDate,
-    category: Option<String>,
-    tags: Option<Vec<String>>,
+    pub date: Option<NaiveDate>,
+    pub category: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub template: Option<PathBuf>,
     custom_fields: Mapping,
 }
 
@@ -29,8 +32,14 @@ impl Meta {
         let mut meta = serde_yaml::from_str::<Mapping>(input)
             .with_context(|| format!("Failed to read YAML input: '{input}'"))?;
         let title = get_str_value("title", &meta)?;
-        let date_str = get_str_value("date", &meta)?;
-        let date = NaiveDate::parse_from_str(&date_str, DATE_FORMAT)?;
+        let date = {
+            if let Some(value) = meta.get(&Value::String("date".to_string())) {
+                let date_str = value.as_str().context("Failed to read date as a string.")?;
+                Some(NaiveDate::parse_from_str(&date_str, DATE_FORMAT)?)
+            } else {
+                None
+            }
+        };
         let category = {
             if let Some(value) = meta.get(&Value::String("category".to_string())) {
                 let category_str = value
@@ -60,6 +69,17 @@ impl Meta {
                 None
             }
         };
+        let template = {
+            if let Some(value) = meta.get(&Value::String("template".to_string())) {
+                let template_str = value
+                    .as_str()
+                    .context("Failed to read template as a string.")?;
+                Some(PathBuf::from(template_str))
+            } else {
+                None
+            }
+        };
+
         for key in vec!["title", "date", "category", "tags"] {
             meta.remove(&Value::String(key.to_string()));
         }
@@ -69,6 +89,7 @@ impl Meta {
             date,
             category,
             tags,
+            template,
             custom_fields: meta,
         })
     }
@@ -84,10 +105,12 @@ impl Serialize for Meta {
             Value::String("title".to_string()),
             Value::String(self.title.clone()),
         );
-        values.insert(
-            Value::String("date".to_string()),
-            Value::String(self.date.format(DATE_FORMAT).to_string()),
-        );
+        if let Some(date) = &self.date {
+            values.insert(
+                Value::String("date".to_string()),
+                Value::String(date.format(DATE_FORMAT).to_string()),
+            );
+        };
         if let Some(category) = &self.category {
             values.insert(
                 Value::String("category".to_string()),
