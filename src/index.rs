@@ -20,7 +20,7 @@ pub struct IndexItem {
 pub fn index(directory: &PathBuf) -> Result<Vec<IndexItem>> {
     let mut index_items = index_files(directory, 0).with_context(|| "Failed to index files")?;
     index_items.sort_by(|a, b| a.index_type.cmp(&b.index_type));
-    info!("Indexed {} items (files/dirs/feeds)", index_items.len());
+    info!("Indexed {} items", index_items.len());
     Ok(index_items)
 }
 
@@ -30,9 +30,9 @@ fn index_files(directory: &PathBuf, depth: u32) -> Result<Vec<IndexItem>> {
         let path = file?.path();
         // Directory
         if path.is_dir() {
-            let feed_path = path.join(COLLECTION_CONFIG_FN);
+            let collection_path = path.join(COLLECTION_CONFIG_FN);
             // Collection directory
-            if feed_path.exists() {
+            if collection_path.exists() {
                 actions.push(IndexItem {
                     path,
                     index_type: IndexType::Collection,

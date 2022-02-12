@@ -39,8 +39,8 @@ impl Entry {
         let meta = Meta::from_str(&meta_str)?;
 
         let location = EntryLocation::from_paths(&parent_dir, source_dir, &path, &target_ext)
-            .with_context(|| "Failed to get post location")?;
-        trace!("Loaded post '{}'", &location.child_path.display());
+            .with_context(|| "Failed to get entry location")?;
+        trace!("Loaded content of  '{}'", &location.child_path.display());
 
         Ok(Entry {
             location,
@@ -99,7 +99,7 @@ impl EntryLocation {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CollectionBinding {
-    pub posts: Vec<Entry>,
+    pub entries: Vec<Entry>,
     pub rss: Option<RssInfo>,
 }
 
@@ -110,7 +110,7 @@ pub struct RssInfo {
 }
 
 impl CollectionBinding {
-    pub fn new(posts: Vec<Entry>, config: &CollectionConfig) -> Self {
+    pub fn new(entries: Vec<Entry>, config: &CollectionConfig) -> Self {
         let rss = {
             if let Some(rss_path) = &config.rss {
                 Some(RssInfo {
@@ -121,6 +121,6 @@ impl CollectionBinding {
                 None
             }
         };
-        Self { posts, rss }
+        Self { entries, rss }
     }
 }

@@ -162,21 +162,21 @@ pub fn generate(
                     }
                 }
 
-                // 2. Sort the feed ascending by date
-                // TODO: Make this a optional feature that only applies to feeds?
+                // 2. Sort the collection ascending by date
+                // TODO: Make this a optional feature
                 entries.sort_by(|a, b| b.meta.date.cmp(&a.meta.date));
 
                 // 3. Generate templates
                 if let Some(templates) = &collection_cfg.templates {
                     for template in templates.iter() {
                         let template_path = source_dir.join(template);
-                        for post in entries.iter() {
-                            let out_path = post
+                        for entry in entries.iter() {
+                            let out_path = entry
                                 .location
                                 .child_path
                                 .with_extension(&config.template_ext);
                             trace!("Render template '{}'", out_path.display());
-                            let result = renderer.render(&template_path, Some(post))?;
+                            let result = renderer.render(&template_path, Some(entry))?;
                             // Write
                             collection_files.insert(out_path, result);
                         }
@@ -185,7 +185,7 @@ pub fn generate(
 
                 // 4. Generate connections
                 if let Some(index_templates) = &collection_cfg.connections {
-                    let feed = CollectionBinding::new(entries.clone(), &collection_cfg);
+                    let binding = CollectionBinding::new(entries.clone(), &collection_cfg);
                     for template in index_templates.iter() {
                         let template_path = source_dir.join(template);
                         let content = Entry::load(
@@ -211,7 +211,7 @@ pub fn generate(
                             );
                         }
                         trace!("Render index template '{}'", template_path.display());
-                        let result = renderer.render(&template_path, Some(&feed))?;
+                        let result = renderer.render(&template_path, Some(&binding))?;
                         let out_path = source_dir.join(template);
                         collection_files.insert(out_path, result);
                     }
@@ -239,33 +239,33 @@ pub fn generate(
 }
 
 fn generate_rss(
-    posts: &[Entry],
+    entries: &[Entry],
     rss_path: &PathBuf,
-    config: &Config,
-    feed_cfg: &CollectionConfig,
+    main_cfg: &Config,
+    collection_cfg: &CollectionConfig,
 ) -> Result<String> {
-    let has_content = feed_cfg.templates.as_ref().unwrap_or(&vec![]).len() > 0;
+    let has_content = collection_cfg.templates.as_ref().unwrap_or(&vec![]).len() > 0;
     let mut rss_items = Vec::new();
-    for post in posts {
+    for entry in entries {
         let link = {
             if has_content {
-                config.base_url.clone() + post.location.short_route.to_str().unwrap()
+                main_cfg.base_url.clone() + entry.location.short_route.to_str().unwrap()
             } else {
-                config.base_url.clone() + "#" + &post.location.file_stem
+                main_cfg.base_url.clone() + "#" + &entry.location.file_stem
             }
         };
         let pub_date = {
-            if let Some(date) = post.meta.date {
+            if let Some(date) = entry.meta.date {
                 date.and_time(NaiveTime::from_hms(12, 0, 0))
             } else {
-                warn!("The post {} item has no date! This can cause issues with templates and RSS feed generation.", post.meta.title);
+                warn!("The entry {} item has no date! This can cause issues with templates and RSS feed generation.", entry.meta.title);
                 NaiveDateTime::from_timestamp(0, 0)
             }
         };
         rss_items.push(RssItem {
-            title: post.meta.title.clone(),
+            title: entry.meta.title.clone(),
             link: link.clone(),
-            description: post.source.to_string(),
+            description: entry.source.to_string(),
             guid: RssGuid {
                 value: link,
                 is_permalink: has_content,
@@ -273,11 +273,11 @@ fn generate_rss(
             pub_date,
         })
     }
-    let link = format!("{}/{}", config.base_url, rss_path.display());
+    let link = format!("{}/{}", main_cfg.base_url, rss_path.display());
     let channel = RssChannel::new(
-        feed_cfg.title.clone(),
+        collection_cfg.title.clone(),
         link,
-        feed_cfg.description.clone(),
+        collection_cfg.description.clone(),
         rss_items,
     );
     let feed = RssFeed::from_channel(channel);
