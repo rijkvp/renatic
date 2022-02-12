@@ -7,6 +7,7 @@ use std::{fs, path::PathBuf};
 pub struct Config {
     pub base_url: String,
     pub ignore_hidden: bool,
+    #[serde(rename="ignore")]
     pub ignore_paths: Vec<PathBuf>,
     pub template_ext: String,
     pub target_ext: String,
@@ -43,7 +44,7 @@ pub struct CollectionConfig {
     pub title: String,
     pub description: String,
     pub template: Option<PathBuf>,
-    pub connections: Option<Vec<PathBuf>>,
+    pub connections: Vec<PathBuf>,
     pub rss: Option<PathBuf>,
 }
 

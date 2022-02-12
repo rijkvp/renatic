@@ -109,7 +109,6 @@ pub fn generate(
                 }
                 // None of the above. A 'normal' file
                 else {
-                    trace!("Copy '{}'", &child_path.display());
                     fs::copy(index_item.path, out_path)?;
                 }
             }
@@ -167,6 +166,7 @@ pub fn generate(
 
                 // 4. Generate index and other connections
                 let binding = CollectionBinding::new(entries.clone(), &collection_cfg);
+                // Standard index connection
                 let index_path = collection_dir
                     .join(consts::INDEX_SOURCE_FS)
                     .with_extension(&config.content_ext);
@@ -177,44 +177,22 @@ pub fn generate(
                         &source_dir,
                         &out_dir,
                         &config.target_ext,
-                        Some(binding),
+                        Some(binding.clone()),
                     )?;
                     generate_inclusive_template(&entry, &renderer)?;
                 }
-                // TODO: Generate connections
-
-
-                // if let Some(index_templates) = &collection_cfg.connections {
-                //     for template in index_templates.iter() {
-                //         let template_path = source_dir.join(template);
-                //         let content = Entry::load(
-                //             &collection_dir,
-                //             &source_dir,
-                //             &template_path,
-                //             &config.template_ext,
-                //         )?;
-                //         if let Some(template) = content.meta.template.clone() {
-                //             let template_path = source_dir.join(template);
-                //             let content_out = out_path.with_extension(&config.target_ext);
-                //             trace!(
-                //                 "Rendering template '{}' to '{}'",
-                //                 template_path.display(),
-                //                 content_out.display()
-                //             );
-                //             let html = renderer.render(&template_path, Some(&content))?;
-                //             fs::write(content_out, minifier::minify_string(&html, mfc_level))?;
-                //         } else {
-                //             error!(
-                //                 "Unkown template file for '{}'. Please specify a template.",
-                //                 child_path.display()
-                //             );
-                //         }
-                //         trace!("Render index template '{}'", template_path.display());
-                //         let result = renderer.render(&template_path, Some(&binding))?;
-                //         let out_path = source_dir.join(template);
-                //         collection_files.insert(out_path, result);
-                //     }
-                // }
+                // Custom connections
+                for conn_path in collection_cfg.connections.iter() {
+                    let conn_path = source_dir.join(conn_path);
+                    let content = Entry::load(
+                        &conn_path,
+                        &source_dir,
+                        &out_dir,
+                        &config.template_ext,
+                        Some(binding.clone()),
+                    )?;
+                    generate_inclusive_template(&content, &renderer)?;
+                }
 
                 // 5. Generate RSS if enabled
                 if let Some(rss_path) = &collection_cfg.rss {
