@@ -3,7 +3,7 @@ use crate::{
     consts,
     index::{self, IndexType},
     renderer::ContentRenderer,
-    sources::entry::{CollectionBinding, Entry},
+    sources::content::{CollectionBinding, Entry, Location},
     util::{
         minifier::{self, MinificationLevel},
         rss::{self, RssChannel, RssFeed, RssGuid, RssItem},
@@ -81,10 +81,13 @@ pub fn generate(
                 // Content file
                 if ext == &config.content_ext {
                     let content = Entry::load(
-                        &index_item.path,
-                        source_dir,
-                        out_dir,
-                        &config.target_ext,
+                        Location::new(
+                            &index_item.path,
+                            source_dir,
+                            out_dir,
+                            &config.target_ext,
+                            None,
+                        )?,
                         None,
                     )?;
                     generate_inclusive_template(&content, &renderer)?;
@@ -140,10 +143,13 @@ pub fn generate(
                         && entry_path.file_stem().context("")? != consts::INDEX_SOURCE_FS
                     {
                         let content = Entry::load(
-                            &entry_path,
-                            &source_dir,
-                            &out_dir,
-                            &config.target_ext,
+                            Location::new(
+                                &entry_path,
+                                &source_dir,
+                                &out_dir,
+                                &config.target_ext,
+                                None,
+                            )?,
                             None,
                         )
                         .with_context(|| {
@@ -171,12 +177,14 @@ pub fn generate(
                     .join(consts::INDEX_SOURCE_FS)
                     .with_extension(&config.content_ext);
                 if index_path.exists() {
-                    // TODO: Custom file name
                     let entry = Entry::load(
-                        &index_path,
-                        &source_dir,
-                        &out_dir,
-                        &config.target_ext,
+                        Location::new(
+                            &index_path,
+                            &source_dir,
+                            &out_dir,
+                            &config.target_ext,
+                            Some(consts::INDEX_TARGET_FS),
+                        )?,
                         Some(binding.clone()),
                     )?;
                     generate_inclusive_template(&entry, &renderer)?;
@@ -185,10 +193,13 @@ pub fn generate(
                 for conn_path in collection_cfg.connections.iter() {
                     let conn_path = source_dir.join(conn_path);
                     let content = Entry::load(
-                        &conn_path,
-                        &source_dir,
-                        &out_dir,
-                        &config.template_ext,
+                        Location::new(
+                            &conn_path,
+                            &source_dir,
+                            &out_dir,
+                            &config.template_ext,
+                            None,
+                        )?,
                         Some(binding.clone()),
                     )?;
                     generate_inclusive_template(&content, &renderer)?;
@@ -257,7 +268,7 @@ fn generate_rss_feed(
             if has_content {
                 main_cfg.base_url.clone() + entry.location.short_route.to_str().unwrap()
             } else {
-                main_cfg.base_url.clone() + "#" + &entry.location.file_stem
+                main_cfg.base_url.clone() + "#" + &entry.location.target_file_stem
             }
         };
         let pub_date = {

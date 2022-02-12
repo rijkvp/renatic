@@ -1,5 +1,5 @@
 pub mod meta;
-pub mod entry;
+pub mod content;
 
 use tera::Context as TemplateContext;
 
