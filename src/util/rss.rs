@@ -76,6 +76,7 @@ pub struct RssGuid {
     #[serde(rename = "isPermaLink")]
     pub is_permalink: bool,
 }
+
 #[derive(Clone, Deserialize, Serialize)]
 pub struct RssAtomLink {
     pub href: String,

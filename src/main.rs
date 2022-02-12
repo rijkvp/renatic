@@ -1,14 +1,15 @@
 mod config;
-mod content;
-mod feed;
-mod gen;
-mod meta;
-mod rss;
-mod templating;
+mod consts;
+mod generator;
+mod index;
+mod sources;
+mod renderer;
+mod util;
 
 use anyhow::Result;
-use clap::{ArgEnum, Parser};
+use clap::Parser;
 use log::error;
+use util::minifier::MinificationLevel;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -37,13 +38,6 @@ enum Commands {
         #[clap(long, short = 'm', arg_enum, default_value_t = MinificationLevel::SpecCompliant)]
         minification: MinificationLevel,
     },
-}
-
-#[derive(Clone, ArgEnum)]
-pub enum MinificationLevel {
-    Disabled,
-    SpecCompliant,
-    Maximal,
 }
 
 fn main() -> Result<()> {
@@ -75,7 +69,7 @@ fn main() -> Result<()> {
             if source_dir == out_dir {
                 error!("The source directory can't be the destination directory!");
             } else {
-                gen::generate(&source_dir, &out_dir, &minification)?;
+                generator::generate(&source_dir, &out_dir, &minification)?;
             }
         }
     }

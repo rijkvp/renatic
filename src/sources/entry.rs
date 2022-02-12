@@ -1,67 +1,58 @@
-use crate::meta::Meta;
-use anyhow::{anyhow, Context, Result};
+use super::{meta::Meta, TemplateSource};
+use crate::{config::CollectionConfig, util::parser};
+use anyhow::{Context, Result};
 use log::trace;
-use pulldown_cmark::{Options, Parser, html};
 use serde::Serialize;
 use std::{fs, path::PathBuf};
+use tera::Context as TemplateContext;
 
-#[derive(Debug, Clone, Serialize)]
-pub struct Content {
-    pub location: ContentLocation,
-    pub meta: Meta,
-    pub content: String,
+impl TemplateSource for Entry {
+    fn get_context(&self) -> TemplateContext {
+        TemplateContext::from_serialize(self).unwrap()
+    }
 }
 
-impl Content {
+impl TemplateSource for CollectionBinding {
+    fn get_context(&self) -> TemplateContext {
+        TemplateContext::from_serialize(self).unwrap()
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Entry {
+    pub meta: Meta,
+    pub location: EntryLocation,
+    pub source: String,
+    pub collection: Option<CollectionBinding>,
+}
+
+impl Entry {
     pub fn load(
         parent_dir: &PathBuf,
         source_dir: &PathBuf,
         path: &PathBuf,
         target_ext: &str,
-    ) -> Result<Content> {
+    ) -> Result<Entry> {
         let file_str = fs::read_to_string(&path)?;
-        let (meta, content) = split_md_meta(&file_str)
+        let (meta_str, content) = parser::parse_markdown_with_meta(&file_str)
             .with_context(|| format!("Failed to read file '{}'", path.display()))?;
+        let meta = Meta::from_str(&meta_str)?;
 
-        let location = ContentLocation::from_paths(&parent_dir, source_dir, &path, &target_ext)
+        let location = EntryLocation::from_paths(&parent_dir, source_dir, &path, &target_ext)
             .with_context(|| "Failed to get post location")?;
         trace!("Loaded post '{}'", &location.child_path.display());
 
-        Ok(Content {
+        Ok(Entry {
             location,
             meta,
-            content,
+            source: content,
+            collection: None,
         })
     }
 }
 
-fn split_md_meta(input: &str) -> Result<(Meta, String)> {
-    let splits: Vec<&str> = input.split("---").collect();
-    if splits.len() != 3 {
-        return Err(anyhow!("Invalid meta section!"));
-    }
-    let meta = Meta::from_str(&splits[1]).with_context(|| "Failed to read meta information")?;
-    let contents = md_to_html(&splits[2]);
-    Ok((meta, contents))
-}
-
-fn md_to_html(input: &str) -> String {
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_STRIKETHROUGH);
-    options.insert(Options::ENABLE_FOOTNOTES);
-    options.insert(Options::ENABLE_TABLES);
-    options.insert(Options::ENABLE_TASKLISTS);
-    let parser = Parser::new_ext(input, options);
-
-    // Write to String buffer.
-    let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
-
-    html_output
-}
-
 #[derive(Debug, Clone, Serialize)]
-pub struct ContentLocation {
+pub struct EntryLocation {
     /// Source path
     #[serde(skip)]
     pub source_path: PathBuf,
@@ -80,7 +71,7 @@ pub struct ContentLocation {
     pub short_route: PathBuf,
 }
 
-impl ContentLocation {
+impl EntryLocation {
     pub fn from_paths(
         parent_dir: &PathBuf,
         source_dir: &PathBuf,
@@ -103,5 +94,33 @@ impl ContentLocation {
             route: route.clone(),
             short_route: route.with_extension(""),
         })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CollectionBinding {
+    pub posts: Vec<Entry>,
+    pub rss: Option<RssInfo>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RssInfo {
+    pub path: PathBuf,
+    pub route: PathBuf,
+}
+
+impl CollectionBinding {
+    pub fn new(posts: Vec<Entry>, config: &CollectionConfig) -> Self {
+        let rss = {
+            if let Some(rss_path) = &config.rss {
+                Some(RssInfo {
+                    path: rss_path.clone(),
+                    route: PathBuf::from("/").join(&rss_path),
+                })
+            } else {
+                None
+            }
+        };
+        Self { posts, rss }
     }
 }
