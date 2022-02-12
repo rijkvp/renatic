@@ -57,6 +57,7 @@ pub fn generate(
         }
 
         let out_path = out_dir.join(&child_path);
+        // TODO: Make this work when extension or filename changes
         if out_path.exists() {
             warn!(
                 "The file '{}' was skipped because it was already generated in an earlier stage! \

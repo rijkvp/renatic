@@ -27,10 +27,7 @@ impl ContentRenderer {
 
         info!("Loaded {} template files", tera.templates.len());
 
-        Ok(Self {
-            tera,
-            mfc_level,
-        })
+        Ok(Self { tera, mfc_level })
     }
 
     pub fn render(&self, path: &PathBuf, template: Option<&dyn TemplateSource>) -> Result<String> {
