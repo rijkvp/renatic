@@ -3,18 +3,13 @@ use serde::Deserialize;
 use std::{fs, path::PathBuf};
 
 #[derive(Debug, Deserialize)]
+#[serde(default)]
 pub struct Config {
-    #[serde(default)]
     pub base_url: String,
-    #[serde(default)]
     pub ignore_hidden: bool,
-    #[serde(default)]
     pub ignore_paths: Vec<PathBuf>,
-    #[serde(default)]
     pub template_ext: String,
-    #[serde(default)]
     pub target_ext: String,
-    #[serde(default)]
     pub content_ext: String,
 }
 
@@ -42,17 +37,13 @@ impl Config {
     }
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Default, Deserialize, Clone)]
+#[serde(default)]
 pub struct CollectionConfig {
-    #[serde(default)]
     pub title: String,
-    #[serde(default)]
     pub description: String,
-    #[serde(default)]
-    pub templates: Option<Vec<PathBuf>>,
-    #[serde(default)]
+    pub template: Option<PathBuf>,
     pub connections: Option<Vec<PathBuf>>,
-    #[serde(default)]
     pub rss: Option<PathBuf>,
 }
 

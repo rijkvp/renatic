@@ -1,4 +1,8 @@
-use crate::{config::Config, sources::TemplateSource};
+use crate::{
+    config::Config,
+    sources::TemplateSource,
+    util::minifier::{self, MinificationLevel},
+};
 use anyhow::{Context, Result};
 use log::info;
 use std::path::PathBuf;
@@ -6,12 +10,16 @@ use tera::{Context as TemplateContext, Tera};
 
 #[derive(Clone)]
 pub struct ContentRenderer {
-    parent_dir: PathBuf,
+    mfc_level: MinificationLevel,
     tera: Tera,
 }
 
 impl ContentRenderer {
-    pub fn load(parent_dir: PathBuf, config: &Config) -> Result<Self> {
+    pub fn load(
+        parent_dir: PathBuf,
+        config: &Config,
+        mfc_level: MinificationLevel,
+    ) -> Result<Self> {
         let dirs = format!("{}/**/*.{}", parent_dir.display(), config.template_ext);
 
         let mut tera = Tera::new(&dirs)?;
@@ -19,12 +27,13 @@ impl ContentRenderer {
 
         info!("Loaded {} template files", tera.templates.len());
 
-        Ok(Self { parent_dir, tera })
+        Ok(Self {
+            tera,
+            mfc_level,
+        })
     }
 
     pub fn render(&self, path: &PathBuf, template: Option<&dyn TemplateSource>) -> Result<String> {
-        let canonicalized_path = path.canonicalize()?;
-        let child_path = canonicalized_path.strip_prefix(&self.parent_dir)?;
         let context = {
             if let Some(template) = template {
                 template.get_context()
@@ -32,13 +41,15 @@ impl ContentRenderer {
                 TemplateContext::default()
             }
         };
-        self.tera
-            .render(child_path.to_str().unwrap(), &context)
+        let html_output = self
+            .tera
+            .render(path.to_str().unwrap(), &context)
             .with_context(|| {
                 format!(
                     "Failed to render template '{}' with context '{context:#?}'",
-                    child_path.display(),
+                    path.display(),
                 )
-            })
+            })?;
+        Ok(minifier::minify_string(&html_output, &self.mfc_level))
     }
 }

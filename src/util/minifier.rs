@@ -8,8 +8,8 @@ pub enum MinificationLevel {
     Maximal,
 }
 
-pub fn minify_string(input: &str, minification: &MinificationLevel) -> String {
-    match minification {
+pub fn minify_string(input: &str, mfc_level: &MinificationLevel) -> String {
+    match mfc_level {
         MinificationLevel::Disabled => input.to_string(),
         MinificationLevel::SpecCompliant => {
             String::from_utf8(minify(input.as_bytes(), &Cfg::spec_compliant())).unwrap()

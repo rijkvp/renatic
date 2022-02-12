@@ -11,8 +11,8 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use chrono::{NaiveDateTime, NaiveTime};
-use log::{error, info, trace, warn};
-use std::{collections::HashMap, ffi::OsStr, fs, path::PathBuf};
+use log::{info, trace, warn};
+use std::{ffi::OsStr, fs, path::PathBuf};
 
 pub fn generate(
     source_dir: &PathBuf,
@@ -28,7 +28,7 @@ pub fn generate(
         )
     })?;
 
-    let renderer = ContentRenderer::load(source_dir.clone(), &config)?;
+    let renderer = ContentRenderer::load(source_dir.clone(), &config, mfc_level.clone())?;
 
     if out_dir.exists() {
         fs::remove_dir_all(out_dir).with_context(|| "Failed to remove previous output")?;
@@ -68,7 +68,7 @@ pub fn generate(
 
         match index_item.index_type {
             IndexType::Directory => {
-                trace!("Create direcory '{}'", &out_dir.display());
+                trace!("Create direcory '{}'", &out_path.display());
                 fs::create_dir(out_path)?;
             }
             IndexType::File => {
@@ -80,35 +80,23 @@ pub fn generate(
                     .unwrap();
                 // Content file
                 if ext == &config.content_ext {
-                    info!("Redering content of '{}'", &child_path.display());
                     let content = Entry::load(
-                        source_dir,
-                        source_dir,
                         &index_item.path,
-                        &config.template_ext,
+                        source_dir,
+                        out_dir,
+                        &config.target_ext,
+                        None,
                     )?;
-                    if let Some(template) = content.meta.template.clone() {
-                        let template_path = source_dir.join(template);
-                        let content_out = out_path.with_extension(&config.target_ext);
-                        trace!(
-                            "Rendering template '{}' to '{}'",
-                            template_path.display(),
-                            content_out.display()
-                        );
-                        let html = renderer.render(&template_path, Some(&content))?;
-                        fs::write(content_out, minifier::minify_string(&html, mfc_level))?;
-                    } else {
-                        error!(
-                            "Unkown template file for '{}'. Please specify a template.",
-                            child_path.display()
-                        );
-                    }
+                    generate_inclusive_template(&content, &renderer)?;
                 }
                 // Template file without source
                 else if ext == &config.template_ext {
-                    trace!("Render HTML '{}'", &child_path.display());
+                    trace!(
+                        "Generate template without source '{}'",
+                        &child_path.display()
+                    );
                     let html = renderer.render(&index_item.path, None)?;
-                    fs::write(out_path, minifier::minify_string(&html, mfc_level))?;
+                    fs::write(out_path, &html)?;
                 }
                 // Minifiable file
                 else if consts::MINIFY_EXTS.contains(&ext) {
@@ -140,25 +128,29 @@ pub fn generate(
                 fs::create_dir(&out_path)?;
 
                 info!("Generating collection '{}'", child_path.display());
-                let mut collection_files = HashMap::<PathBuf, String>::new();
 
                 // 1. Load all content entries of the collection
                 let mut entries = Vec::<Entry>::new();
                 for entry in fs::read_dir(collection_dir)? {
-                    let path = entry?.path().to_owned();
-                    if let Some(ext) = path.extension() {
-                        if path.is_file() && ext.eq_ignore_ascii_case(&config.content_ext) {
-                            let content = Entry::load(
-                                &child_path.to_path_buf(),
-                                collection_dir,
-                                &path,
-                                &config.template_ext,
-                            )
-                            .with_context(|| {
-                                format!("Failed to load content item '{}'", path.display())
-                            })?;
-                            entries.push(content);
-                        }
+                    let entry_path = entry?.path().to_owned();
+                    if entry_path.is_file()
+                        && entry_path
+                            .extension()
+                            .context("")?
+                            .eq_ignore_ascii_case(&config.content_ext)
+                        && entry_path.file_stem().context("")? != consts::INDEX_SOURCE_FS
+                    {
+                        let content = Entry::load(
+                            &entry_path,
+                            &source_dir,
+                            &out_dir,
+                            &config.target_ext,
+                            None,
+                        )
+                        .with_context(|| {
+                            format!("Failed to load content item '{}'", entry_path.display())
+                        })?;
+                        entries.push(content);
                     }
                 }
 
@@ -167,68 +159,67 @@ pub fn generate(
                 entries.sort_by(|a, b| b.meta.date.cmp(&a.meta.date));
 
                 // 3. Generate templates
-                if let Some(templates) = &collection_cfg.templates {
-                    for template in templates.iter() {
-                        let template_path = source_dir.join(template);
-                        for entry in entries.iter() {
-                            let out_path = entry
-                                .location
-                                .child_path
-                                .with_extension(&config.template_ext);
-                            trace!("Render template '{}'", out_path.display());
-                            let result = renderer.render(&template_path, Some(entry))?;
-                            // Write
-                            collection_files.insert(out_path, result);
-                        }
+                if let Some(template_path) = &collection_cfg.template {
+                    for entry in entries.iter() {
+                        generate_template(&template_path, entry, &renderer)?;
                     }
                 }
 
-                // 4. Generate connections
-                if let Some(index_templates) = &collection_cfg.connections {
-                    let binding = CollectionBinding::new(entries.clone(), &collection_cfg);
-                    for template in index_templates.iter() {
-                        let template_path = source_dir.join(template);
-                        let content = Entry::load(
-                            source_dir,
-                            &collection_dir,
-                            &template_path,
-                            &config.template_ext,
-                        )?;
-                        if let Some(template) = content.meta.template.clone() {
-                            let template_path = source_dir.join(template);
-                            let content_out = out_path.with_extension(&config.target_ext);
-                            trace!(
-                                "Rendering template '{}' to '{}'",
-                                template_path.display(),
-                                content_out.display()
-                            );
-                            let html = renderer.render(&template_path, Some(&content))?;
-                            fs::write(content_out, minifier::minify_string(&html, mfc_level))?;
-                        } else {
-                            error!(
-                                "Unkown template file for '{}'. Please specify a template.",
-                                child_path.display()
-                            );
-                        }
-                        trace!("Render index template '{}'", template_path.display());
-                        let result = renderer.render(&template_path, Some(&binding))?;
-                        let out_path = source_dir.join(template);
-                        collection_files.insert(out_path, result);
-                    }
+                // 4. Generate index and other connections
+                let binding = CollectionBinding::new(entries.clone(), &collection_cfg);
+                let index_path = collection_dir
+                    .join(consts::INDEX_SOURCE_FS)
+                    .with_extension(&config.content_ext);
+                if index_path.exists() {
+                    // TODO: Custom file name
+                    let entry = Entry::load(
+                        &index_path,
+                        &source_dir,
+                        &out_dir,
+                        &config.target_ext,
+                        Some(binding),
+                    )?;
+                    generate_inclusive_template(&entry, &renderer)?;
                 }
+                // TODO: Generate connections
+
+
+                // if let Some(index_templates) = &collection_cfg.connections {
+                //     for template in index_templates.iter() {
+                //         let template_path = source_dir.join(template);
+                //         let content = Entry::load(
+                //             &collection_dir,
+                //             &source_dir,
+                //             &template_path,
+                //             &config.template_ext,
+                //         )?;
+                //         if let Some(template) = content.meta.template.clone() {
+                //             let template_path = source_dir.join(template);
+                //             let content_out = out_path.with_extension(&config.target_ext);
+                //             trace!(
+                //                 "Rendering template '{}' to '{}'",
+                //                 template_path.display(),
+                //                 content_out.display()
+                //             );
+                //             let html = renderer.render(&template_path, Some(&content))?;
+                //             fs::write(content_out, minifier::minify_string(&html, mfc_level))?;
+                //         } else {
+                //             error!(
+                //                 "Unkown template file for '{}'. Please specify a template.",
+                //                 child_path.display()
+                //             );
+                //         }
+                //         trace!("Render index template '{}'", template_path.display());
+                //         let result = renderer.render(&template_path, Some(&binding))?;
+                //         let out_path = source_dir.join(template);
+                //         collection_files.insert(out_path, result);
+                //     }
+                // }
 
                 // 5. Generate RSS if enabled
                 if let Some(rss_path) = &collection_cfg.rss {
-                    let rss = generate_rss(&entries, rss_path, &config, &collection_cfg)?;
-                    trace!("Render RSS feed '{}'", rss_path.display());
-                    collection_files.insert(rss_path.to_path_buf(), rss);
-                }
-
-                // 6. Write generated files
-                trace!("Writing {} generated files", collection_files.len());
-                for (c_child_path, html) in collection_files {
-                    let c_out_path = out_dir.join(c_child_path);
-                    fs::write(c_out_path, minifier::minify_string(&html, &mfc_level))?;
+                    let rss_out = out_dir.join(rss_path);
+                    generate_rss_feed(&entries, rss_path, &rss_out, &config, &collection_cfg)?;
                 }
             }
         }
@@ -238,13 +229,50 @@ pub fn generate(
     Ok(())
 }
 
-fn generate_rss(
+fn generate_inclusive_template(entry: &Entry, renderer: &ContentRenderer) -> Result<()> {
+    let template_path = entry.meta.template.as_ref().context(format!(
+        "Unspecified required template option for '{}'",
+        entry.location.source_child_path.display()
+    ))?;
+    generate_template(template_path, entry, renderer)
+}
+
+fn generate_template(
+    template_path: &PathBuf,
+    entry: &Entry,
+    renderer: &ContentRenderer,
+) -> Result<()> {
+    trace!(
+        "Generate content for {}",
+        entry.location.source_child_path.display()
+    );
+    let html = renderer
+        .render(&template_path, Some(entry))
+        .with_context(|| {
+            format!(
+                "Failed to generate content for '{}' using template '{}'",
+                entry.location.source_child_path.display(),
+                template_path.display(),
+            )
+        })?;
+    fs::write(&entry.location.target_path, html).with_context(|| {
+        format!(
+            "Failed to write generated content to {}",
+            entry.location.target_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn generate_rss_feed(
     entries: &[Entry],
     rss_path: &PathBuf,
+    rss_out_path: &PathBuf,
     main_cfg: &Config,
     collection_cfg: &CollectionConfig,
-) -> Result<String> {
-    let has_content = collection_cfg.templates.as_ref().unwrap_or(&vec![]).len() > 0;
+) -> Result<()> {
+    trace!("Generating RSS feed '{}'", rss_path.display());
+    let has_content = collection_cfg.template.is_some();
     let mut rss_items = Vec::new();
     for entry in entries {
         let link = {
@@ -265,7 +293,7 @@ fn generate_rss(
         rss_items.push(RssItem {
             title: entry.meta.title.clone(),
             link: link.clone(),
-            description: entry.source.to_string(),
+            description: entry.content.to_string(),
             guid: RssGuid {
                 value: link,
                 is_permalink: has_content,
@@ -282,5 +310,6 @@ fn generate_rss(
     );
     let feed = RssFeed::from_channel(channel);
     let rss_str = rss::to_str(feed)?;
-    Ok(rss_str)
+    fs::write(rss_out_path, rss_str)?;
+    Ok(())
 }
